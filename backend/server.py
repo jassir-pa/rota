@@ -261,6 +261,72 @@ async def get_employees(current_user: User = Depends(get_current_active_user)):
     employees = await db.users.find({"role": UserRole.EMPLOYEE}).to_list(1000)
     return [User(**employee) for employee in employees]
 
+@api_router.get("/users/{user_id}", response_model=User)
+async def get_user(user_id: str, current_user: User = Depends(get_current_active_user)):
+    if current_user.role not in [UserRole.ADMIN, UserRole.COORDINATOR]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return User(**user)
+
+@api_router.put("/users/{user_id}", response_model=User)
+async def update_user(user_id: str, user_data: UserUpdate, current_user: User = Depends(get_current_active_user)):
+    if current_user.role not in [UserRole.ADMIN, UserRole.COORDINATOR]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    
+    # Check if user exists
+    existing_user = await db.users.find_one({"id": user_id})
+    if not existing_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Prepare update data
+    update_data = {}
+    for field, value in user_data.dict(exclude_unset=True).items():
+        if field == "password" and value:
+            update_data["password_hash"] = hash_password(value)
+        elif value is not None:
+            update_data[field] = value
+    
+    # Check if username already exists (if updating username)
+    if "username" in update_data:
+        existing_username = await db.users.find_one({"username": update_data["username"], "id": {"$ne": user_id}})
+        if existing_username:
+            raise HTTPException(status_code=400, detail="Username already exists")
+    
+    # Update user
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": update_data}
+    )
+    
+    # Get updated user
+    updated_user = await db.users.find_one({"id": user_id})
+    return User(**updated_user)
+
+@api_router.delete("/users/{user_id}")
+async def delete_user(user_id: str, current_user: User = Depends(get_current_active_user)):
+    if current_user.role not in [UserRole.ADMIN, UserRole.COORDINATOR]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    
+    # Check if user exists
+    existing_user = await db.users.find_one({"id": user_id})
+    if not existing_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Don't allow deleting admin users
+    if existing_user.get("role") == UserRole.ADMIN:
+        raise HTTPException(status_code=400, detail="Cannot delete admin users")
+    
+    # Delete user and their schedule
+    await db.users.delete_one({"id": user_id})
+    await db.schedules.delete_many({"user_id": user_id})
+    await db.schedule_requests.delete_many({"employee_id": user_id})
+    
+    return {"message": "User deleted successfully"}
+
 # Schedule Management Routes
 @api_router.post("/schedules", response_model=Schedule)
 async def create_schedule(schedule_data: Schedule, current_user: User = Depends(get_current_active_user)):
