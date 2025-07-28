@@ -366,12 +366,12 @@ async def download_template(current_user: User = Depends(get_current_active_user
     ws = wb.active
     ws.title = "Plantilla Horarios"
     
-    # Headers
+    # Headers - exact format requested
     headers = [
         "Nombre", "Servicio", "Desde", "Hasta",
         "Lunes INICIO JORNADA", "Lunes INICIO DESCANSO", "Lunes FIN DESCANSO", "Lunes FIN JORNADA",
         "Martes INICIO JORNADA", "Martes INICIO DESCANSO", "Martes FIN DESCANSO", "Martes FIN JORNADA",
-        "Miércoles INICIO JORNADA", "Miércoles INICIO DESCANSO", "Miércoles FIN DESCANSO", "Miércoles FIN JORNADA",
+        "miercoles INICIO JORNADA", "miercoles INICIO DESCANSO", "miercoles FIN DESCANSO", "miercoles FIN JORNADA",
         "Jueves INICIO JORNADA", "Jueves INICIO DESCANSO", "Jueves FIN DESCANSO", "Jueves FIN JORNADA",
         "Viernes INICIO JORNADA", "Viernes INICIO DESCANSO", "Viernes FIN DESCANSO", "Viernes FIN JORNADA",
         "Sábado INICIO JORNADA", "Sábado INICIO DESCANSO", "Sábado FIN DESCANSO", "Sábado FIN JORNADA",
@@ -389,6 +389,23 @@ async def download_template(current_user: User = Depends(get_current_active_user
     # Adjust column widths
     for col in range(1, len(headers) + 1):
         ws.column_dimensions[chr(64 + col)].width = 20
+    
+    # Add sample data row
+    sample_data = [
+        "Juan Pérez", "Administración", "2024-01-01", "2024-12-31",
+        "08:00", "12:00", "13:00", "17:00",  # Lunes
+        "08:00", "12:00", "13:00", "17:00",  # Martes
+        "08:00", "12:00", "13:00", "17:00",  # Miércoles
+        "08:00", "12:00", "13:00", "17:00",  # Jueves
+        "08:00", "12:00", "13:00", "17:00",  # Viernes
+        "", "", "", "",  # Sábado (vacío)
+        "", "", "", ""   # Domingo (vacío)
+    ]
+    
+    for col, value in enumerate(sample_data, 1):
+        cell = ws.cell(row=2, column=col)
+        cell.value = value
+        cell.font = Font(italic=True, color="666666")
     
     # Save to BytesIO
     output = io.BytesIO()
