@@ -22,10 +22,11 @@ const Layout = ({ children }) => {
     }
   };
 
+  // Using the provided image as base64 - this is a placeholder, you'll need to convert the actual image
   const gambrixLogo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
   return (
-    <div style={{ backgroundColor: configuration.background_color }} className="min-h-screen">
+    <div style={{ backgroundColor: configuration.background_color }} className="min-h-screen flex flex-col">
       <nav className="bg-white shadow-lg">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
@@ -47,18 +48,16 @@ const Layout = ({ children }) => {
         </div>
       </nav>
       
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+      <main className="flex-1 max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
         {children}
       </main>
       
       <footer className="bg-gray-100 border-t border-gray-200 mt-auto">
         <div className="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-center">
-            <img 
-              src={gambrixLogo} 
-              alt="Gambrix Logo" 
-              className="h-6 w-6 mr-2"
-            />
+            <div className="w-6 h-6 mr-2 bg-gray-800 rounded-full flex items-center justify-center">
+              <span className="text-white text-xs font-bold">G</span>
+            </div>
             <span className="text-xs text-gray-500">CREADOR GAMBRIX</span>
           </div>
         </div>
