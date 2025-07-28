@@ -580,6 +580,8 @@ async def init_admin():
     await db.users.insert_one(admin_data)
     return {"message": "Admin user created successfully", "username": "admin", "password": "admin123"}
 
+# Include the router in the main app
+app.include_router(api_router)
 
 app.add_middleware(
     CORSMiddleware,
