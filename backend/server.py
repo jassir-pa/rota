@@ -198,8 +198,388 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
 
-# Include the router in the main app
-app.include_router(api_router)
+# Authentication Routes
+@api_router.post("/register", response_model=User)
+async def register(user_data: UserCreate):
+    # Check if user already exists
+    existing_user = await db.users.find_one({"username": user_data.username})
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Username already registered")
+    
+    # Hash password
+    hashed_password = hash_password(user_data.password)
+    
+    # Create user
+    user_dict = user_data.dict()
+    user_dict.pop("password")
+    user_dict["password_hash"] = hashed_password
+    user_obj = User(**user_dict)
+    
+    await db.users.insert_one(user_obj.dict())
+    return user_obj
+
+@api_router.post("/login", response_model=Token)
+async def login(user_data: UserLogin):
+    user = await db.users.find_one({"username": user_data.username})
+    if not user or not verify_password(user_data.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
+    
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user["username"]}, expires_delta=access_token_expires
+    )
+    
+    user_obj = User(**user)
+    return Token(access_token=access_token, token_type="bearer", user=user_obj)
+
+@api_router.get("/me", response_model=User)
+async def read_users_me(current_user: User = Depends(get_current_active_user)):
+    return current_user
+
+# User Management Routes
+@api_router.get("/users", response_model=List[User])
+async def get_users(current_user: User = Depends(get_current_active_user)):
+    if current_user.role not in [UserRole.ADMIN, UserRole.COORDINATOR]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    
+    users = await db.users.find().to_list(1000)
+    return [User(**user) for user in users]
+
+@api_router.get("/employees", response_model=List[User])
+async def get_employees(current_user: User = Depends(get_current_active_user)):
+    if current_user.role not in [UserRole.ADMIN, UserRole.COORDINATOR]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    
+    employees = await db.users.find({"role": UserRole.EMPLOYEE}).to_list(1000)
+    return [User(**employee) for employee in employees]
+
+# Schedule Management Routes
+@api_router.post("/schedules", response_model=Schedule)
+async def create_schedule(schedule_data: Schedule, current_user: User = Depends(get_current_active_user)):
+    if current_user.role not in [UserRole.ADMIN, UserRole.COORDINATOR]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    
+    await db.schedules.insert_one(schedule_data.dict())
+    return schedule_data
+
+@api_router.get("/schedules", response_model=List[Schedule])
+async def get_schedules(current_user: User = Depends(get_current_active_user)):
+    if current_user.role == UserRole.EMPLOYEE:
+        # Employees can only see their own schedules
+        schedules = await db.schedules.find({"user_id": current_user.id}).to_list(1000)
+    else:
+        # Coordinators and admins can see all schedules
+        schedules = await db.schedules.find().to_list(1000)
+    
+    return [Schedule(**schedule) for schedule in schedules]
+
+@api_router.get("/schedules/{user_id}", response_model=Schedule)
+async def get_user_schedule(user_id: str, current_user: User = Depends(get_current_active_user)):
+    if current_user.role == UserRole.EMPLOYEE and current_user.id != user_id:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    
+    schedule = await db.schedules.find_one({"user_id": user_id})
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    
+    return Schedule(**schedule)
+
+@api_router.get("/my-schedule", response_model=Schedule)
+async def get_my_schedule(current_user: User = Depends(get_current_active_user)):
+    schedule = await db.schedules.find_one({"user_id": current_user.id})
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    
+    return Schedule(**schedule)
+
+@api_router.put("/schedules/{schedule_id}", response_model=Schedule)
+async def update_schedule(schedule_id: str, schedule_data: Schedule, current_user: User = Depends(get_current_active_user)):
+    if current_user.role not in [UserRole.ADMIN, UserRole.COORDINATOR]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    
+    await db.schedules.update_one(
+        {"id": schedule_id},
+        {"$set": schedule_data.dict()}
+    )
+    return schedule_data
+
+# Schedule Request Routes
+@api_router.post("/schedule-requests", response_model=ScheduleRequest)
+async def create_schedule_request(request_data: ScheduleRequestCreate, current_user: User = Depends(get_current_active_user)):
+    if current_user.role != UserRole.EMPLOYEE:
+        raise HTTPException(status_code=403, detail="Only employees can create schedule requests")
+    
+    request_dict = request_data.dict()
+    request_dict["employee_id"] = current_user.id
+    request_obj = ScheduleRequest(**request_dict)
+    
+    await db.schedule_requests.insert_one(request_obj.dict())
+    return request_obj
+
+@api_router.get("/schedule-requests", response_model=List[ScheduleRequest])
+async def get_schedule_requests(current_user: User = Depends(get_current_active_user)):
+    if current_user.role == UserRole.EMPLOYEE:
+        # Employees can only see their own requests
+        requests = await db.schedule_requests.find({"employee_id": current_user.id}).to_list(1000)
+    else:
+        # Coordinators and admins can see all requests
+        requests = await db.schedule_requests.find().to_list(1000)
+    
+    return [ScheduleRequest(**request) for request in requests]
+
+@api_router.get("/pending-requests", response_model=List[ScheduleRequest])
+async def get_pending_requests(current_user: User = Depends(get_current_active_user)):
+    if current_user.role not in [UserRole.ADMIN, UserRole.COORDINATOR]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    
+    requests = await db.schedule_requests.find({"status": RequestStatus.PENDING}).to_list(1000)
+    return [ScheduleRequest(**request) for request in requests]
+
+@api_router.put("/schedule-requests/{request_id}/respond", response_model=ScheduleRequest)
+async def respond_to_request(request_id: str, response_data: ScheduleRequestResponse, current_user: User = Depends(get_current_active_user)):
+    if current_user.role not in [UserRole.ADMIN, UserRole.COORDINATOR]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    
+    update_data = {
+        "status": response_data.status,
+        "coordinator_response": response_data.response,
+        "processed_by": current_user.id,
+        "processed_at": datetime.utcnow()
+    }
+    
+    await db.schedule_requests.update_one(
+        {"id": request_id},
+        {"$set": update_data}
+    )
+    
+    updated_request = await db.schedule_requests.find_one({"id": request_id})
+    return ScheduleRequest(**updated_request)
+
+# Excel Import/Export Routes
+@api_router.get("/download-template")
+async def download_template(current_user: User = Depends(get_current_active_user)):
+    if current_user.role not in [UserRole.ADMIN, UserRole.COORDINATOR]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    
+    # Create Excel template
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Plantilla Horarios"
+    
+    # Headers
+    headers = [
+        "Nombre", "Servicio", "Desde", "Hasta",
+        "Lunes INICIO JORNADA", "Lunes INICIO DESCANSO", "Lunes FIN DESCANSO", "Lunes FIN JORNADA",
+        "Martes INICIO JORNADA", "Martes INICIO DESCANSO", "Martes FIN DESCANSO", "Martes FIN JORNADA",
+        "Miércoles INICIO JORNADA", "Miércoles INICIO DESCANSO", "Miércoles FIN DESCANSO", "Miércoles FIN JORNADA",
+        "Jueves INICIO JORNADA", "Jueves INICIO DESCANSO", "Jueves FIN DESCANSO", "Jueves FIN JORNADA",
+        "Viernes INICIO JORNADA", "Viernes INICIO DESCANSO", "Viernes FIN DESCANSO", "Viernes FIN JORNADA",
+        "Sábado INICIO JORNADA", "Sábado INICIO DESCANSO", "Sábado FIN DESCANSO", "Sábado FIN JORNADA",
+        "Domingo INICIO JORNADA", "Domingo INICIO DESCANSO", "Domingo FIN DESCANSO", "Domingo FIN JORNADA"
+    ]
+    
+    # Style headers
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col)
+        cell.value = header
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill(start_color="CCCCCC", end_color="CCCCCC", fill_type="solid")
+        cell.alignment = Alignment(horizontal="center")
+    
+    # Adjust column widths
+    for col in range(1, len(headers) + 1):
+        ws.column_dimensions[chr(64 + col)].width = 20
+    
+    # Save to BytesIO
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    
+    return StreamingResponse(
+        io.BytesIO(output.read()),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=plantilla_horarios.xlsx"}
+    )
+
+@api_router.post("/import-schedules")
+async def import_schedules(file: UploadFile = File(...), current_user: User = Depends(get_current_active_user)):
+    if current_user.role not in [UserRole.ADMIN, UserRole.COORDINATOR]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    
+    if not file.filename.endswith('.xlsx'):
+        raise HTTPException(status_code=400, detail="Only .xlsx files are supported")
+    
+    try:
+        contents = await file.read()
+        df = pd.read_excel(io.BytesIO(contents))
+        
+        imported_count = 0
+        for _, row in df.iterrows():
+            # Find user by name
+            user = await db.users.find_one({"full_name": row["Nombre"]})
+            if not user:
+                continue
+            
+            # Create schedule
+            schedule_data = {
+                "id": str(uuid.uuid4()),
+                "user_id": user["id"],
+                "service": row["Servicio"],
+                "monday_start": row.get("Lunes INICIO JORNADA"),
+                "monday_break_start": row.get("Lunes INICIO DESCANSO"),
+                "monday_break_end": row.get("Lunes FIN DESCANSO"),
+                "monday_end": row.get("Lunes FIN JORNADA"),
+                "tuesday_start": row.get("Martes INICIO JORNADA"),
+                "tuesday_break_start": row.get("Martes INICIO DESCANSO"),
+                "tuesday_break_end": row.get("Martes FIN DESCANSO"),
+                "tuesday_end": row.get("Martes FIN JORNADA"),
+                "wednesday_start": row.get("Miércoles INICIO JORNADA"),
+                "wednesday_break_start": row.get("Miércoles INICIO DESCANSO"),
+                "wednesday_break_end": row.get("Miércoles FIN DESCANSO"),
+                "wednesday_end": row.get("Miércoles FIN JORNADA"),
+                "thursday_start": row.get("Jueves INICIO JORNADA"),
+                "thursday_break_start": row.get("Jueves INICIO DESCANSO"),
+                "thursday_break_end": row.get("Jueves FIN DESCANSO"),
+                "thursday_end": row.get("Jueves FIN JORNADA"),
+                "friday_start": row.get("Viernes INICIO JORNADA"),
+                "friday_break_start": row.get("Viernes INICIO DESCANSO"),
+                "friday_break_end": row.get("Viernes FIN DESCANSO"),
+                "friday_end": row.get("Viernes FIN JORNADA"),
+                "saturday_start": row.get("Sábado INICIO JORNADA"),
+                "saturday_break_start": row.get("Sábado INICIO DESCANSO"),
+                "saturday_break_end": row.get("Sábado FIN DESCANSO"),
+                "saturday_end": row.get("Sábado FIN JORNADA"),
+                "sunday_start": row.get("Domingo INICIO JORNADA"),
+                "sunday_break_start": row.get("Domingo INICIO DESCANSO"),
+                "sunday_break_end": row.get("Domingo FIN DESCANSO"),
+                "sunday_end": row.get("Domingo FIN JORNADA"),
+                "created_at": datetime.utcnow()
+            }
+            
+            # Update or create schedule
+            await db.schedules.update_one(
+                {"user_id": user["id"]},
+                {"$set": schedule_data},
+                upsert=True
+            )
+            imported_count += 1
+        
+        return {"message": f"Successfully imported {imported_count} schedules"}
+    
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error processing file: {str(e)}")
+
+@api_router.get("/export-schedules")
+async def export_schedules(current_user: User = Depends(get_current_active_user)):
+    if current_user.role not in [UserRole.ADMIN, UserRole.COORDINATOR]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    
+    # Get all schedules with user info
+    schedules = await db.schedules.find().to_list(1000)
+    data = []
+    
+    for schedule in schedules:
+        user = await db.users.find_one({"id": schedule["user_id"]})
+        if user:
+            data.append({
+                "Nombre": user["full_name"],
+                "Servicio": schedule["service"],
+                "Lunes INICIO JORNADA": schedule.get("monday_start"),
+                "Lunes INICIO DESCANSO": schedule.get("monday_break_start"),
+                "Lunes FIN DESCANSO": schedule.get("monday_break_end"),
+                "Lunes FIN JORNADA": schedule.get("monday_end"),
+                "Martes INICIO JORNADA": schedule.get("tuesday_start"),
+                "Martes INICIO DESCANSO": schedule.get("tuesday_break_start"),
+                "Martes FIN DESCANSO": schedule.get("tuesday_break_end"),
+                "Martes FIN JORNADA": schedule.get("tuesday_end"),
+                "Miércoles INICIO JORNADA": schedule.get("wednesday_start"),
+                "Miércoles INICIO DESCANSO": schedule.get("wednesday_break_start"),
+                "Miércoles FIN DESCANSO": schedule.get("wednesday_break_end"),
+                "Miércoles FIN JORNADA": schedule.get("wednesday_end"),
+                "Jueves INICIO JORNADA": schedule.get("thursday_start"),
+                "Jueves INICIO DESCANSO": schedule.get("thursday_break_start"),
+                "Jueves FIN DESCANSO": schedule.get("thursday_break_end"),
+                "Jueves FIN JORNADA": schedule.get("thursday_end"),
+                "Viernes INICIO JORNADA": schedule.get("friday_start"),
+                "Viernes INICIO DESCANSO": schedule.get("friday_break_start"),
+                "Viernes FIN DESCANSO": schedule.get("friday_break_end"),
+                "Viernes FIN JORNADA": schedule.get("friday_end"),
+                "Sábado INICIO JORNADA": schedule.get("saturday_start"),
+                "Sábado INICIO DESCANSO": schedule.get("saturday_break_start"),
+                "Sábado FIN DESCANSO": schedule.get("saturday_break_end"),
+                "Sábado FIN JORNADA": schedule.get("saturday_end"),
+                "Domingo INICIO JORNADA": schedule.get("sunday_start"),
+                "Domingo INICIO DESCANSO": schedule.get("sunday_break_start"),
+                "Domingo FIN DESCANSO": schedule.get("sunday_break_end"),
+                "Domingo FIN JORNADA": schedule.get("sunday_end"),
+            })
+    
+    df = pd.DataFrame(data)
+    output = io.BytesIO()
+    df.to_excel(output, index=False)
+    output.seek(0)
+    
+    return StreamingResponse(
+        io.BytesIO(output.read()),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=horarios_exportados.xlsx"}
+    )
+
+# Configuration Routes
+@api_router.get("/configuration", response_model=Configuration)
+async def get_configuration():
+    config = await db.configurations.find_one()
+    if not config:
+        # Create default configuration
+        default_config = Configuration()
+        await db.configurations.insert_one(default_config.dict())
+        return default_config
+    return Configuration(**config)
+
+@api_router.put("/configuration", response_model=Configuration)
+async def update_configuration(config_data: Configuration, current_user: User = Depends(get_current_active_user)):
+    if current_user.role not in [UserRole.ADMIN, UserRole.COORDINATOR]:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    
+    config_data.updated_at = datetime.utcnow()
+    await db.configurations.update_one(
+        {},
+        {"$set": config_data.dict()},
+        upsert=True
+    )
+    return config_data
+
+# Services Routes
+@api_router.get("/services")
+async def get_services(current_user: User = Depends(get_current_active_user)):
+    users = await db.users.find().to_list(1000)
+    services = list(set([user["service"] for user in users if user.get("service")]))
+    return {"services": services}
+
+# Initialize default admin user
+@api_router.post("/init-admin")
+async def init_admin():
+    # Check if admin already exists
+    admin = await db.users.find_one({"role": UserRole.ADMIN})
+    if admin:
+        return {"message": "Admin user already exists"}
+    
+    # Create default admin
+    admin_data = {
+        "id": str(uuid.uuid4()),
+        "username": "admin",
+        "email": "admin@horarios.com",
+        "full_name": "Administrador",
+        "password_hash": hash_password("admin123"),
+        "role": UserRole.ADMIN,
+        "service": "Administración",
+        "is_active": True,
+        "created_at": datetime.utcnow()
+    }
+    
+    await db.users.insert_one(admin_data)
+    return {"message": "Admin user created successfully", "username": "admin", "password": "admin123"}
+
 
 app.add_middleware(
     CORSMiddleware,
