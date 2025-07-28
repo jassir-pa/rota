@@ -12,6 +12,8 @@ const EmployeeManagement = () => {
   const [loading, setLoading] = useState(true);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState(null);
   const [newEmployee, setNewEmployee] = useState({
     username: '',
     email: '',
@@ -61,9 +63,58 @@ const EmployeeManagement = () => {
         role: 'employee'
       });
       fetchEmployees();
+      alert('Empleado agregado exitosamente');
     } catch (error) {
       console.error('Error adding employee:', error);
       alert('Error al agregar empleado: ' + (error.response?.data?.detail || error.message));
+    }
+  };
+
+  const handleEditEmployee = (employee) => {
+    setEditingEmployee({
+      ...employee,
+      password: '' // Don't show existing password
+    });
+    setShowEditModal(true);
+  };
+
+  const handleUpdateEmployee = async (e) => {
+    e.preventDefault();
+    try {
+      const updateData = {
+        username: editingEmployee.username,
+        email: editingEmployee.email,
+        full_name: editingEmployee.full_name,
+        service: editingEmployee.service,
+        is_active: editingEmployee.is_active
+      };
+      
+      // Only include password if it's not empty
+      if (editingEmployee.password) {
+        updateData.password = editingEmployee.password;
+      }
+
+      await axios.put(`${API}/users/${editingEmployee.id}`, updateData);
+      setShowEditModal(false);
+      setEditingEmployee(null);
+      fetchEmployees();
+      alert('Empleado actualizado exitosamente');
+    } catch (error) {
+      console.error('Error updating employee:', error);
+      alert('Error al actualizar empleado: ' + (error.response?.data?.detail || error.message));
+    }
+  };
+
+  const handleDeleteEmployee = async (employeeId, employeeName) => {
+    if (window.confirm(`¿Estás seguro de que quieres eliminar a ${employeeName}? Esta acción no se puede deshacer.`)) {
+      try {
+        await axios.delete(`${API}/users/${employeeId}`);
+        fetchEmployees();
+        alert('Empleado eliminado exitosamente');
+      } catch (error) {
+        console.error('Error deleting employee:', error);
+        alert('Error al eliminar empleado: ' + (error.response?.data?.detail || error.message));
+      }
     }
   };
 
@@ -115,6 +166,9 @@ const EmployeeManagement = () => {
                 Empleado
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Usuario
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Servicio
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -140,6 +194,9 @@ const EmployeeManagement = () => {
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">{employee.username}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
                     <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
                       {employee.service}
                     </span>
@@ -159,12 +216,26 @@ const EmployeeManagement = () => {
                     )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <button
-                      onClick={() => handleViewSchedule(employee)}
-                      className="text-indigo-600 hover:text-indigo-900 mr-3"
-                    >
-                      Ver Horario
-                    </button>
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() => handleViewSchedule(employee)}
+                        className="text-indigo-600 hover:text-indigo-900"
+                      >
+                        Ver Horario
+                      </button>
+                      <button
+                        onClick={() => handleEditEmployee(employee)}
+                        className="text-green-600 hover:text-green-900"
+                      >
+                        Editar
+                      </button>
+                      <button
+                        onClick={() => handleDeleteEmployee(employee.id, employee.full_name)}
+                        className="text-red-600 hover:text-red-900"
+                      >
+                        Eliminar
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );
@@ -245,6 +316,97 @@ const EmployeeManagement = () => {
                     className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700"
                   >
                     Agregar
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Employee Modal */}
+      {showEditModal && editingEmployee && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div className="mt-3">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">Editar Empleado</h3>
+              <form onSubmit={handleUpdateEmployee}>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Nombre completo</label>
+                    <input
+                      type="text"
+                      required
+                      value={editingEmployee.full_name}
+                      onChange={(e) => setEditingEmployee({...editingEmployee, full_name: e.target.value})}
+                      className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Usuario</label>
+                    <input
+                      type="text"
+                      required
+                      value={editingEmployee.username}
+                      onChange={(e) => setEditingEmployee({...editingEmployee, username: e.target.value})}
+                      className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Email</label>
+                    <input
+                      type="email"
+                      required
+                      value={editingEmployee.email}
+                      onChange={(e) => setEditingEmployee({...editingEmployee, email: e.target.value})}
+                      className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Nueva Contraseña (opcional)</label>
+                    <input
+                      type="password"
+                      value={editingEmployee.password}
+                      onChange={(e) => setEditingEmployee({...editingEmployee, password: e.target.value})}
+                      className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="Dejar vacío para no cambiar"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Servicio</label>
+                    <input
+                      type="text"
+                      required
+                      value={editingEmployee.service}
+                      onChange={(e) => setEditingEmployee({...editingEmployee, service: e.target.value})}
+                      className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={editingEmployee.is_active}
+                        onChange={(e) => setEditingEmployee({...editingEmployee, is_active: e.target.checked})}
+                        className="mr-2"
+                      />
+                      <span className="text-sm font-medium text-gray-700">Activo</span>
+                    </label>
+                  </div>
+                </div>
+                <div className="flex justify-end space-x-3 mt-6">
+                  <button
+                    type="button"
+                    onClick={() => setShowEditModal(false)}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700"
+                  >
+                    Actualizar
                   </button>
                 </div>
               </form>
