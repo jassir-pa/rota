@@ -431,47 +431,85 @@ async def import_schedules(file: UploadFile = File(...), current_user: User = De
         df = pd.read_excel(io.BytesIO(contents))
         
         imported_count = 0
+        created_users = 0
+        
         for _, row in df.iterrows():
-            # Find user by name
-            user = await db.users.find_one({"full_name": row["Nombre"]})
-            if not user:
+            # Skip empty rows
+            if pd.isna(row.get("Nombre")) or not row.get("Nombre"):
                 continue
+                
+            employee_name = str(row["Nombre"]).strip()
+            service_name = str(row["Servicio"]).strip()
             
-            # Create schedule
+            # Check if user exists by name
+            user = await db.users.find_one({"full_name": employee_name})
+            
+            # If user doesn't exist, create them
+            if not user:
+                # Generate username from name
+                username = employee_name.lower().replace(" ", "_").replace(".", "")
+                # Check if username already exists
+                existing_username = await db.users.find_one({"username": username})
+                if existing_username:
+                    username = f"{username}_{str(uuid.uuid4())[:8]}"
+                
+                # Create new user
+                user_data = {
+                    "id": str(uuid.uuid4()),
+                    "username": username,
+                    "email": f"{username}@empresa.com",
+                    "full_name": employee_name,
+                    "password_hash": hash_password("123456"),  # Default password
+                    "role": UserRole.EMPLOYEE,
+                    "service": service_name,
+                    "is_active": True,
+                    "created_at": datetime.utcnow()
+                }
+                
+                await db.users.insert_one(user_data)
+                user = user_data
+                created_users += 1
+            
+            # Create or update schedule
             schedule_data = {
                 "id": str(uuid.uuid4()),
                 "user_id": user["id"],
-                "service": row["Servicio"],
-                "monday_start": row.get("Lunes INICIO JORNADA"),
-                "monday_break_start": row.get("Lunes INICIO DESCANSO"),
-                "monday_break_end": row.get("Lunes FIN DESCANSO"),
-                "monday_end": row.get("Lunes FIN JORNADA"),
-                "tuesday_start": row.get("Martes INICIO JORNADA"),
-                "tuesday_break_start": row.get("Martes INICIO DESCANSO"),
-                "tuesday_break_end": row.get("Martes FIN DESCANSO"),
-                "tuesday_end": row.get("Martes FIN JORNADA"),
-                "wednesday_start": row.get("Miércoles INICIO JORNADA"),
-                "wednesday_break_start": row.get("Miércoles INICIO DESCANSO"),
-                "wednesday_break_end": row.get("Miércoles FIN DESCANSO"),
-                "wednesday_end": row.get("Miércoles FIN JORNADA"),
-                "thursday_start": row.get("Jueves INICIO JORNADA"),
-                "thursday_break_start": row.get("Jueves INICIO DESCANSO"),
-                "thursday_break_end": row.get("Jueves FIN DESCANSO"),
-                "thursday_end": row.get("Jueves FIN JORNADA"),
-                "friday_start": row.get("Viernes INICIO JORNADA"),
-                "friday_break_start": row.get("Viernes INICIO DESCANSO"),
-                "friday_break_end": row.get("Viernes FIN DESCANSO"),
-                "friday_end": row.get("Viernes FIN JORNADA"),
-                "saturday_start": row.get("Sábado INICIO JORNADA"),
-                "saturday_break_start": row.get("Sábado INICIO DESCANSO"),
-                "saturday_break_end": row.get("Sábado FIN DESCANSO"),
-                "saturday_end": row.get("Sábado FIN JORNADA"),
-                "sunday_start": row.get("Domingo INICIO JORNADA"),
-                "sunday_break_start": row.get("Domingo INICIO DESCANSO"),
-                "sunday_break_end": row.get("Domingo FIN DESCANSO"),
-                "sunday_end": row.get("Domingo FIN JORNADA"),
+                "service": service_name,
+                "monday_start": str(row.get("Lunes INICIO JORNADA", "")) if not pd.isna(row.get("Lunes INICIO JORNADA")) else None,
+                "monday_break_start": str(row.get("Lunes INICIO DESCANSO", "")) if not pd.isna(row.get("Lunes INICIO DESCANSO")) else None,
+                "monday_break_end": str(row.get("Lunes FIN DESCANSO", "")) if not pd.isna(row.get("Lunes FIN DESCANSO")) else None,
+                "monday_end": str(row.get("Lunes FIN JORNADA", "")) if not pd.isna(row.get("Lunes FIN JORNADA")) else None,
+                "tuesday_start": str(row.get("Martes INICIO JORNADA", "")) if not pd.isna(row.get("Martes INICIO JORNADA")) else None,
+                "tuesday_break_start": str(row.get("Martes INICIO DESCANSO", "")) if not pd.isna(row.get("Martes INICIO DESCANSO")) else None,
+                "tuesday_break_end": str(row.get("Martes FIN DESCANSO", "")) if not pd.isna(row.get("Martes FIN DESCANSO")) else None,
+                "tuesday_end": str(row.get("Martes FIN JORNADA", "")) if not pd.isna(row.get("Martes FIN JORNADA")) else None,
+                "wednesday_start": str(row.get("miercoles INICIO JORNADA", "")) if not pd.isna(row.get("miercoles INICIO JORNADA")) else None,
+                "wednesday_break_start": str(row.get("miercoles INICIO DESCANSO", "")) if not pd.isna(row.get("miercoles INICIO DESCANSO")) else None,
+                "wednesday_break_end": str(row.get("miercoles FIN DESCANSO", "")) if not pd.isna(row.get("miercoles FIN DESCANSO")) else None,
+                "wednesday_end": str(row.get("miercoles FIN JORNADA", "")) if not pd.isna(row.get("miercoles FIN JORNADA")) else None,
+                "thursday_start": str(row.get("Jueves INICIO JORNADA", "")) if not pd.isna(row.get("Jueves INICIO JORNADA")) else None,
+                "thursday_break_start": str(row.get("Jueves INICIO DESCANSO", "")) if not pd.isna(row.get("Jueves INICIO DESCANSO")) else None,
+                "thursday_break_end": str(row.get("Jueves FIN DESCANSO", "")) if not pd.isna(row.get("Jueves FIN DESCANSO")) else None,
+                "thursday_end": str(row.get("Jueves FIN JORNADA", "")) if not pd.isna(row.get("Jueves FIN JORNADA")) else None,
+                "friday_start": str(row.get("Viernes INICIO JORNADA", "")) if not pd.isna(row.get("Viernes INICIO JORNADA")) else None,
+                "friday_break_start": str(row.get("Viernes INICIO DESCANSO", "")) if not pd.isna(row.get("Viernes INICIO DESCANSO")) else None,
+                "friday_break_end": str(row.get("Viernes FIN DESCANSO", "")) if not pd.isna(row.get("Viernes FIN DESCANSO")) else None,
+                "friday_end": str(row.get("Viernes FIN JORNADA", "")) if not pd.isna(row.get("Viernes FIN JORNADA")) else None,
+                "saturday_start": str(row.get("Sábado INICIO JORNADA", "")) if not pd.isna(row.get("Sábado INICIO JORNADA")) else None,
+                "saturday_break_start": str(row.get("Sábado INICIO DESCANSO", "")) if not pd.isna(row.get("Sábado INICIO DESCANSO")) else None,
+                "saturday_break_end": str(row.get("Sábado FIN DESCANSO", "")) if not pd.isna(row.get("Sábado FIN DESCANSO")) else None,
+                "saturday_end": str(row.get("Sábado FIN JORNADA", "")) if not pd.isna(row.get("Sábado FIN JORNADA")) else None,
+                "sunday_start": str(row.get("Domingo INICIO JORNADA", "")) if not pd.isna(row.get("Domingo INICIO JORNADA")) else None,
+                "sunday_break_start": str(row.get("Domingo INICIO DESCANSO", "")) if not pd.isna(row.get("Domingo INICIO DESCANSO")) else None,
+                "sunday_break_end": str(row.get("Domingo FIN DESCANSO", "")) if not pd.isna(row.get("Domingo FIN DESCANSO")) else None,
+                "sunday_end": str(row.get("Domingo FIN JORNADA", "")) if not pd.isna(row.get("Domingo FIN JORNADA")) else None,
                 "created_at": datetime.utcnow()
             }
+            
+            # Clean empty string values
+            for key, value in schedule_data.items():
+                if value == "" or value == "nan":
+                    schedule_data[key] = None
             
             # Update or create schedule
             await db.schedules.update_one(
@@ -481,7 +519,11 @@ async def import_schedules(file: UploadFile = File(...), current_user: User = De
             )
             imported_count += 1
         
-        return {"message": f"Successfully imported {imported_count} schedules"}
+        return {
+            "message": f"Procesados {imported_count} horarios. Creados {created_users} nuevos empleados.",
+            "imported_schedules": imported_count,
+            "created_users": created_users
+        }
     
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error processing file: {str(e)}")
