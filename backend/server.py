@@ -146,6 +146,14 @@ class ScheduleRequestCreate(BaseModel):
     requested_schedule: Optional[str] = None
     reason: str
 
+class UserUpdate(BaseModel):
+    username: Optional[str] = None
+    email: Optional[str] = None
+    full_name: Optional[str] = None
+    password: Optional[str] = None
+    service: Optional[str] = None
+    is_active: Optional[bool] = None
+
 class ScheduleRequestResponse(BaseModel):
     request_id: str
     status: RequestStatus
